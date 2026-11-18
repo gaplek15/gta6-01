@@ -25,13 +25,14 @@ void main() {
   vec3 col = mix(horizon, mid, smoothstep(0.0, 0.28, h));
   col = mix(col, zenith, smoothstep(0.24, 0.85, h));
   // Warm band hugging the horizon, strongest near the sun's azimuth.
+  // Kept soft (0.22) so the sky reads pale blue-gold, not solid orange.
   float sunAmount = max(dot(normalize(vDir), normalize(sunDir)), 0.0);
-  col += vec3(1.0, 0.55, 0.22) * pow(sunAmount, 6.0) * 0.35 * (1.0 - smoothstep(0.0, 0.5, h));
+  col += vec3(1.0, 0.55, 0.22) * pow(sunAmount, 6.0) * 0.22 * (1.0 - smoothstep(0.0, 0.5, h));
   // Sun disc + halo.
   col += vec3(1.0, 0.85, 0.6) * smoothstep(0.9993, 0.9997, sunAmount) * 2.4;
   col += vec3(1.0, 0.7, 0.4) * pow(sunAmount, 90.0) * 0.55;
   // Fine haze near the horizon.
-  col = mix(col, horizon, (1.0 - smoothstep(-0.02, 0.16, h)) * 0.55);
+  col = mix(col, horizon, (1.0 - smoothstep(-0.02, 0.16, h)) * 0.42);
   gl_FragColor = vec4(col, 1.0);
 }
 `;
@@ -48,7 +49,7 @@ export function createSky(scene, rng) {
       sunDir: { value: sunDir },
       zenith: { value: new THREE.Color(0x2f6fb8) },
       mid: { value: new THREE.Color(0x7fb2dd) },
-      horizon: { value: new THREE.Color(0xf7b06a) },
+      horizon: { value: new THREE.Color(0xf3c48f) }, // paler golden horizon
     },
     side: THREE.BackSide,
     depthWrite: false,
@@ -81,7 +82,7 @@ export function createSky(scene, rng) {
   scene.add(amb);
 
   // Warm haze so distant blocks melt into the horizon.
-  scene.fog = new THREE.Fog(0xe8b98a, 260, 1100);
+  scene.fog = new THREE.Fog(0xeec39a, 260, 1100);
 
   // Soft procedural clouds: radial-gradient sprites at several heights.
   const clouds = [];

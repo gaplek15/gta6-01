@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { ECONOMY, PLACES } from './config.js';
 import { makePerson } from './traffic.js';
+import { idleBreath } from './human.js';
 
 export function createActivities(game) {
   // The waiting taxi passenger at the pangkalan.
@@ -24,6 +25,8 @@ export function updateActivities(game, dt) {
   act.fareCooldown = Math.max(0, act.fareCooldown - dt);
 
   // --- Taxi fare ------------------------------------------------------------
+  // The waiting passenger breathes and looks around (human.js).
+  if (act.passenger.waiting) idleBreath(act.passenger.parts, game.elapsed, 1.3);
   if (act.fare) {
     const d = Math.hypot(act.fare.dest.x - px, act.fare.dest.z - pz);
     game.hud.setObjective(`Antar penumpang ke tujuan`, act.fare.dest, d);

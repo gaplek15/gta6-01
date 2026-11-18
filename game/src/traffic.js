@@ -4,43 +4,16 @@
 import * as THREE from 'three';
 import { CITY, roadCoord, TRAFFIC, PALETTE } from './config.js';
 import { createCar, placeCar } from './vehicles.js';
-import { limb } from './shapes.js';
+import { makeHuman, walkSecondary, SKIN_TONES, HAIR_COLORS } from './human.js';
 
-// A generic person: capsule limbs pivoted at the joints, torso, head.
-// Colours vary; `uniform` dresses them as police.
+// A person built by human.js: real proportions (~1.76 m tall, head ~1/7.6),
+// two-segment limbs with knees and elbows, a face, hair/caps, varied
+// outfits. Same { group, parts } shape the walk code already uses
+// (legL/legR hip pivots, armL/armR shoulder pivots), so every caller
+// (pedestrians, cops, taxi passenger) gets a human for free.
 export function makePerson(game, opts = {}) {
-  const group = new THREE.Group();
-  const skin = new THREE.MeshStandardMaterial({ color: opts.skin || 0xc98a5e, roughness: 0.75 });
-  const shirt = new THREE.MeshStandardMaterial({ color: opts.shirt || 0x888888, roughness: 0.9 });
-  const pants = new THREE.MeshStandardMaterial({ color: opts.pants || 0x2c3e50, roughness: 0.9 });
-  const legL = limb(0.13, 0.52, pants);
-  legL.position.set(-0.15, 0.74, 0);
-  const legR = limb(0.13, 0.52, pants);
-  legR.position.set(0.15, 0.74, 0);
-  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.24, 0.4, 4, 10), shirt);
-  torso.position.y = 1.12;
-  torso.castShadow = true;
-  const armL = limb(0.1, 0.46, shirt);
-  armL.position.set(-0.32, 1.4, 0);
-  const armR = limb(0.1, 0.46, shirt);
-  armR.position.set(0.32, 1.4, 0);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 14, 10), skin);
-  head.position.y = 1.62;
-  head.castShadow = true;
-  group.add(legL, legR, torso, armL, armR, head);
-  if (opts.hat) {
-    const hat = new THREE.Mesh(new THREE.CylinderGeometry(0.21, 0.23, 0.09, 12), new THREE.MeshStandardMaterial({ color: opts.hat, roughness: 0.8 }));
-    hat.position.y = 1.78;
-    group.add(hat);
-  }
-  if (opts.cap) {
-    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.21, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2.2), new THREE.MeshStandardMaterial({ color: opts.cap, roughness: 0.8 }));
-    cap.position.y = 1.66;
-    group.add(cap);
-  }
-  group.traverse((m) => { if (m.isMesh) m.castShadow = true; });
-  game.scene.add(group);
-  return { group, parts: { legL, legR, armL, armR } };
+  const h = makeHuman(game, opts);
+  return { group: h.group, parts: h.parts };
 }
 
 const PED_SHIRTS = [0xd35400, 0x2471a3, 0x1e8449, 0x7d3c98, 0xc0392b, 0x2e86c1, 0xd4ac0d, 0xecf0f1, 0x16a085, 0x943126];
@@ -102,11 +75,19 @@ export function createTraffic(game) {
     const vertical = rng.chance(0.5);
     const x = vertical ? road + side * 9.2 : along;
     const z = vertical ? along : road + side * 9.2;
+    const female = rng.chance(0.3);
+    const headwear = rng.chance(0.3)
+      ? { hat: rng.pick([0x2c3e50, 0x7d3c98, 0xd4ac0d]) }
+      : rng.chance(0.25) ? { cap: rng.pick([0xc0392b, 0x2471a3, 0x1e8449]) } : {};
     const person = makePerson(game, {
+      skin: rng.pick(SKIN_TONES),
       shirt: rng.pick(PED_SHIRTS),
       pants: rng.pick(PED_PANTS),
-      hat: rng.chance(0.3) ? rng.pick([0x2c3e50, 0x7d3c98, 0xd4ac0d]) : undefined,
-      cap: rng.chance(0.25) ? rng.pick([0xc0392b, 0x2471a3, 0x1e8449]) : undefined,
+      hair: rng.pick(HAIR_COLORS),
+      longHair: female && rng.chance(0.7),
+      shortSleeve: rng.chance(0.5),
+      scale: rng.range(0.94, 1.06),
+      ...headwear,
     });
     person.group.position.set(x, 0, z);
     traffic.peds.push({
@@ -276,6 +257,8 @@ export function updateTraffic(game, dt) {
     ped.parts.legR.rotation.x = -swing;
     ped.parts.armL.rotation.x = -swing * 0.7;
     ped.parts.armR.rotation.x = swing * 0.7;
+    // Knees bend, elbows keep a soft bend, the body bobs (human.js).
+    walkSecondary(ped.parts, ped.phase, ped.fleeTimer > 0 ? 0.7 : 0.5);
     ped.group.position.copy(ped.pos);
     ped.group.rotation.y = ped.heading;
   }

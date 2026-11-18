@@ -1,53 +1,26 @@
-// The player on foot: a properly proportioned character (capsule limbs
-// pivoted at the joints, torso, head with cap), walk/run/jump, punch and
-// pistol combat, entering and exiting cars, and the third-person camera.
+// The player on foot: Raka built by human.js — real proportions (~1.76 m,
+// head ~1/7.6), two-segment limbs, a face, orange ojek shirt, red cap and
+// green delivery backpack. Walk/run/jump, punch and pistol combat, entering
+// and exiting cars, and the third-person camera.
 import * as THREE from 'three';
 import { TUNE } from './config.js';
-import { limb } from './shapes.js';
-
-function skinMat() {
-  return new THREE.MeshStandardMaterial({ color: 0xc98a5e, roughness: 0.75 });
-}
-function clothMat(color) {
-  return new THREE.MeshStandardMaterial({ color, roughness: 0.9 });
-}
+import { makeHuman, walkSecondary, idleBreath } from './human.js';
 
 export function createPlayer(game) {
-  const group = new THREE.Group();
-  const skin = skinMat();
-  const shirt = clothMat(0xe86a1a); // Raka's orange ojek shirt
-  const pants = clothMat(0x2c3e50);
-  const capMat = clothMat(0xc0392b);
-
-  const legL = limb(0.14, 0.55, pants);
-  legL.position.set(-0.16, 0.78, 0);
-  const legR = limb(0.14, 0.55, pants);
-  legR.position.set(0.16, 0.78, 0);
-  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.26, 0.42, 4, 12), shirt);
-  torso.position.y = 1.18;
-  torso.castShadow = true;
-  const armL = limb(0.11, 0.5, shirt);
-  armL.position.set(-0.34, 1.48, 0);
-  const armR = limb(0.11, 0.5, shirt);
-  armR.position.set(0.34, 1.48, 0);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.21, 16, 12), skin);
-  head.position.y = 1.72;
-  head.castShadow = true;
-  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.22, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2.2), capMat);
-  cap.position.y = 1.76;
-  const brim = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.04, 0.2), capMat);
-  brim.position.set(0, 1.78, -0.2);
-  // Small backpack (ojek rider's delivery bag).
-  const bag = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.5, 0.18), clothMat(0x1e8449));
-  bag.position.set(0, 1.2, 0.3);
-  bag.castShadow = true;
-
-  group.add(legL, legR, torso, armL, armR, head, cap, brim, bag);
-  group.traverse((m) => { if (m.isMesh) m.castShadow = true; });
+  // Raka: orange ojek shirt, red cap, green delivery backpack.
+  const h = makeHuman(game, {
+    skin: 0xc98a5e,
+    shirt: 0xe86a1a,
+    pants: 0x2c3e50,
+    shoes: 0x1a1a1a,
+    cap: 0xc0392b,
+    backpack: 0x1e8449,
+    shortSleeve: true,
+  });
 
   const player = {
-    group,
-    parts: { legL, legR, armL, armR, torso, head },
+    group: h.group,
+    parts: h.parts,
     pos: new THREE.Vector3(0, 0, 0),
     vy: 0,
     heading: 0,
@@ -58,8 +31,7 @@ export function createPlayer(game) {
     punchCooldown: 0,
     shootCooldown: 0,
   };
-  game.scene.add(group);
-  return player;
+  return player; // makeHuman already added the group to the scene
 }
 
 // Move on foot. `input` carries WASD relative to the camera yaw; the camera
@@ -96,11 +68,15 @@ export function updatePlayer(game, dt) {
     p.parts.legR.rotation.x = -swing;
     p.parts.armL.rotation.x = -swing * 0.8;
     p.parts.armR.rotation.x = swing * 0.8;
+    // Knees bend, elbows keep a soft bend, the body bobs (human.js).
+    walkSecondary(p.parts, p.walkPhase, input.run ? 0.75 : 0.55);
   } else {
     p.parts.legL.rotation.x *= 0.8;
     p.parts.legR.rotation.x *= 0.8;
     p.parts.armL.rotation.x *= 0.8;
     p.parts.armR.rotation.x *= 0.8;
+    // Standing still: soft breathing + the head looking around (human.js).
+    idleBreath(p.parts, game.elapsed, 0);
   }
 
   // Jump + gravity.

@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { TUNE, ECONOMY, PLACES } from './config.js';
 import { createCar, placeCar } from './vehicles.js';
 import { makePerson } from './traffic.js';
+import { walkSecondary } from './human.js';
 
 export function createPolice(game) {
   return {
@@ -43,6 +44,7 @@ function spawnCop(game) {
   const dist = game.rng.range(18, 30);
   const person = makePerson(game, {
     shirt: 0x1a3a8a, pants: 0x14181d, cap: 0x1a3a8a, skin: 0xb57748,
+    badge: true, belt: true,
   });
   const x = p.x + Math.cos(angle) * dist;
   const z = p.z + Math.sin(angle) * dist;
@@ -164,6 +166,8 @@ export function updatePolice(game, dt) {
     cop.parts.legR.rotation.x = -swing;
     cop.parts.armL.rotation.x = -swing * 0.7;
     cop.parts.armR.rotation.x = swing * 0.7;
+    // Running knees + elbows (human.js).
+    walkSecondary(cop.parts, cop.phase, 0.7);
     cop.group.position.copy(cop.pos);
     cop.group.rotation.y = cop.heading;
     if (!player.inCar && dist < TUNE.copCatchDistance) {
