@@ -1,192 +1,129 @@
-// Side activities: taxi fares, golden coins to collect, the gun shop and
-// a meal at Mbak Sari's warung.
-// One job: give the player ways to earn money between missions.
+// Side activities: taxi fares, the ten golden Teluk coins, and the shops
+// (warung meals that heal, the gun store that sells the pistol).
 import * as THREE from 'three';
-import { COINS, SHOP, TAXI, WARUNG_HEAL } from './config.js';
-import { PLACES } from './world.js';
-import { range } from './random.js';
+import { ECONOMY, PLACES } from './config.js';
+import { makePerson } from './traffic.js';
 
-export function createActivities(scene, world, rng) {
-  const coins = [];
-  const state = {
-    taxi: null, // {customer, dest, timer, fare}
-    taxiCooldown: 0,
-    coinsGot: 0,
-    coinBonusPaid: false,
-  };
-
-  // Ten golden coins at fixed, memorable spots around the city.
-  const coinSpots = [
-    [30, 44], [-90, -76], [210, -135], [-210, 165], [90, 224],
-    [-150, -196], [-30, 250], [150, 104], [60, -210], [-240, 30],
-  ];
-  for (const [x, z] of coinSpots) {
-    const mesh = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.7, 0.7, 0.15, 16),
-      new THREE.MeshLambertMaterial({ color: 0xffd94d, emissive: 0xffc21e, emissiveIntensity: 0.8 }),
-    );
-    mesh.rotation.x = Math.PI / 2;
-    mesh.position.set(x, 1.2, z);
-    scene.add(mesh);
-    coins.push({ mesh, x, z, got: false });
-  }
-
-  // Taxi destination marker (reused beam, green instead of yellow).
-  const taxiMarker = new THREE.Group();
-  const beam = new THREE.Mesh(
-    new THREE.CylinderGeometry(1.2, 1.2, 60, 12, 1, true),
-    new THREE.MeshBasicMaterial({ color: 0x2ecc71, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false }),
-  );
-  beam.position.y = 30;
-  taxiMarker.add(beam);
-  taxiMarker.visible = false;
-  scene.add(taxiMarker);
-
-  function updateCoins(dt, game) {
-    const pos = game.player.inCar ? game.player.inCar.pos : game.player.pos;
-    for (const c of coins) {
-      if (c.got) continue;
-      c.mesh.rotation.y += dt * 3;
-      c.mesh.position.y = 1.2 + Math.sin(performance.now() / 250 + c.x) * 0.2;
-      if (Math.hypot(pos.x - c.x, pos.z - c.z) < 2.5) {
-        c.got = true;
-        c.mesh.visible = false;
-        state.coinsGot += 1;
-        game.player.money += COINS.value;
-        game.audio.play('coin');
-        game.hud.toast(`Koin Teluk! +$${COINS.value} (${state.coinsGot}/${COINS.total})`);
-        if (state.coinsGot === COINS.total && !state.coinBonusPaid) {
-          state.coinBonusPaid = true;
-          game.player.money += COINS.bonusAll;
-          game.hud.toast(`SEMUA KOIN! Bonus +$${COINS.bonusAll}`);
-        }
-      }
-    }
-  }
-
-  function startTaxi(game, customer) {
-    const dest = world.randomRoadPoint();
-    const dist = Math.hypot(dest.x - customer.pos.x, dest.z - customer.pos.z);
-    const fare = Math.round((TAXI.fareMin + rng() * (TAXI.fareMax - TAXI.fareMin)) + dist * 0.2);
-    state.taxi = { customer, dest, timer: dist * TAXI.timePerMetre + 30, fare, pickedUp: false };
-    taxiMarker.position.set(dest.x, 0, dest.z);
-    taxiMarker.visible = false;
-    game.hud.toast('Penumpang naik! Antar ke tujuan hijau.');
-    game.audio.play('pickup');
-  }
-
-  function updateTaxi(dt, game) {
-    if (state.taxiCooldown > 0) state.taxiCooldown -= dt;
-    const t = state.taxi;
-    if (!t) return;
-    const car = game.player.inCar;
-    if (!t.pickedUp) {
-      // Waiting for the player to drive up in a car.
-      if (car) {
-        const d = Math.hypot(car.pos.x - t.customer.pos.x, car.pos.z - t.customer.pos.z);
-        if (d < 5) {
-          t.pickedUp = true;
-          game.traffic.removePed(t.customer);
-          taxiMarker.visible = true;
-          game.hud.toast('Penumpang naik! Antar ke tujuan hijau.');
-        }
-      }
-      return;
-    }
-    t.timer -= dt;
-    if (t.timer <= 0) {
-      state.taxi = null;
-      taxiMarker.visible = false;
-      state.taxiCooldown = 20;
-      game.hud.toast('Penumpang kesal dan turun. Taksi gagal.');
-      return;
-    }
-    if (car) {
-      const d = Math.hypot(car.pos.x - t.dest.x, car.pos.z - t.dest.z);
-      if (d < 7) {
-        game.player.money += t.fare;
-        game.player.xp += 20;
-        game.audio.play('mission');
-        game.hud.toast(`Taksi selesai! +$${t.fare}`);
-        state.taxi = null;
-        taxiMarker.visible = false;
-        state.taxiCooldown = 10;
-        game.saveGame();
-      }
-    }
-  }
-
-  function taxiObjective() {
-    const t = state.taxi;
-    if (!t) return null;
-    return t.pickedUp
-      ? { text: `Antar penumpang (${Math.ceil(t.timer)} dtk)`, pos: t.dest }
-      : { text: 'Jemput penumpang (naik mobil dulu)', pos: { x: t.customer.pos.x, z: t.customer.pos.z } };
-  }
-
-  // The gun shop and the warung are places the player walks up to and uses.
-  function nearShop(game) {
-    const p = game.player.pos;
-    return Math.hypot(p.x - PLACES.gunshop.x, p.z - PLACES.gunshop.z) < 8;
-  }
-
-  function nearWarung(game) {
-    const p = game.player.pos;
-    return Math.hypot(p.x - PLACES.warung.x, p.z - PLACES.warung.z) < 8;
-  }
-
-  function buyPistol(game) {
-    if (game.player.pistol) {
-      if (game.player.money >= SHOP.ammoPrice) {
-        game.player.money -= SHOP.ammoPrice;
-        game.player.ammo += SHOP.ammoAmount;
-        game.hud.toast(`Beli peluru +${SHOP.ammoAmount} (-$${SHOP.ammoPrice})`);
-        game.audio.play('pickup');
-      } else {
-        game.hud.toast('Uang tidak cukup untuk peluru.');
-      }
-      return;
-    }
-    if (game.player.money >= SHOP.pistolPrice) {
-      game.player.money -= SHOP.pistolPrice;
-      game.player.pistol = true;
-      game.player.ammo = SHOP.ammoAmount;
-      game.hud.toast(`Pistol dibeli! (-$${SHOP.pistolPrice}) Klik kiri untuk menembak.`);
-      game.audio.play('pickup');
-    } else {
-      game.hud.toast(`Pistol $${SHOP.pistolPrice} — uangmu belum cukup.`);
-    }
-  }
-
-  function eatAtWarung(game) {
-    if (game.player.health >= 100) {
-      game.hud.toast('Mbak Sari: "Kamu sehat-sehat saja, Raka."');
-      return;
-    }
-    if (game.player.money < SHOP.mealPrice) {
-      game.hud.toast('Makan di warung $20 — uangmu tidak cukup.');
-      return;
-    }
-    game.player.money -= SHOP.mealPrice;
-    game.player.health = Math.min(100, game.player.health + WARUNG_HEAL);
-    game.hud.toast(`Makan di Warung Mbak Sari +${WARUNG_HEAL} darah (-$${SHOP.mealPrice})`);
-    game.audio.play('pickup');
-  }
-
-  function update(dt, game) {
-    updateCoins(dt, game);
-    updateTaxi(dt, game);
-  }
-
+export function createActivities(game) {
+  // The waiting taxi passenger at the pangkalan.
+  const person = makePerson(game, { shirt: 0xd4ac0d, pants: 0x2c3e50, hat: 0x2c3e50 });
+  person.group.position.set(PLACES.taxiStand.x, 0, PLACES.taxiStand.z);
   return {
-    state,
-    coins,
-    update,
-    startTaxi,
-    taxiObjective,
-    nearShop,
-    nearWarung,
-    buyPistol,
-    eatAtWarung,
+    passenger: { ...person, pos: new THREE.Vector3(PLACES.taxiStand.x, 0, PLACES.taxiStand.z), waiting: true },
+    fare: null, // { dest: {x,z}, pay }
+    fareCooldown: 0,
+    coinsCollected: 0,
   };
+}
+
+export function updateActivities(game, dt) {
+  const act = game.activities;
+  const player = game.player;
+  const px = player.inCar ? player.inCar.pos.x : player.pos.x;
+  const pz = player.inCar ? player.inCar.pos.z : player.pos.z;
+  act.fareCooldown = Math.max(0, act.fareCooldown - dt);
+
+  // --- Taxi fare ------------------------------------------------------------
+  if (act.fare) {
+    const d = Math.hypot(act.fare.dest.x - px, act.fare.dest.z - pz);
+    game.hud.setObjective(`Antar penumpang ke tujuan`, act.fare.dest, d);
+    if (d < 9) {
+      game.money += act.fare.pay;
+      game.addXp(ECONOMY.xpPerFare);
+      game.audio.coin();
+      game.hud.toast(`Penumpang diantar  +$${act.fare.pay}`);
+      act.fare = null;
+      act.fareCooldown = 8;
+      act.passenger.waiting = true;
+      act.passenger.group.visible = true;
+    }
+  } else if (act.passenger.waiting && player.inCar && act.fareCooldown <= 0) {
+    const d = Math.hypot(act.passenger.pos.x - px, act.passenger.pos.z - pz);
+    if (d < 9) game.hud.setPrompt('Tekan T untuk antar penumpang');
+  }
+
+  // --- Coins ------------------------------------------------------------------
+  for (const coin of game.world.coins) {
+    if (coin.taken) continue;
+    coin.mesh.rotation.y += dt * 2.4;
+    coin.mesh.position.y = 1.1 + Math.sin(game.elapsed * 2 + coin.x) * 0.25;
+    const d = Math.hypot(coin.x - px, coin.z - pz);
+    if (d < 2.2) {
+      coin.taken = true;
+      coin.mesh.visible = false;
+      game.money += ECONOMY.coinValue;
+      game.addXp(ECONOMY.xpPerCoin);
+      act.coinsCollected += 1;
+      game.audio.coin();
+      game.hud.toast(`Koin Teluk  +$${ECONOMY.coinValue} (${act.coinsCollected}/${ECONOMY.coinCount})`);
+      if (act.coinsCollected >= ECONOMY.coinCount) {
+        game.money += ECONOMY.coinBonus;
+        game.hud.toast(`Semua koin terkumpul! Bonus +$${ECONOMY.coinBonus}`);
+      }
+    }
+  }
+}
+
+// Start a taxi fare: the passenger gets in, a destination is picked.
+export function startFare(game) {
+  const act = game.activities;
+  if (act.fare || !act.passenger.waiting || !game.player.inCar || act.fareCooldown > 0) return false;
+  const lines = game.world.roads;
+  const dest = {
+    x: game.rng.pick(lines) + game.rng.range(-6, 6),
+    z: game.rng.pick(lines) + game.rng.range(-6, 6),
+  };
+  act.fare = { dest, pay: game.rng.int(ECONOMY.taxiFareMin, ECONOMY.taxiFareMax) };
+  act.passenger.waiting = false;
+  act.passenger.group.visible = false;
+  game.hud.toast('Penumpang naik. Antar ke tujuan!');
+  game.audio.coin();
+  return true;
+}
+
+// The E-key interaction near shops and landmarks. Returns a prompt label or ''.
+export function interactPrompt(game) {
+  const player = game.player;
+  if (player.inCar) return '';
+  const px = player.pos.x;
+  const pz = player.pos.z;
+  const near = (place, r) => Math.hypot(place.x - px, place.z - pz) < r;
+  if (near(PLACES.warung, 7)) return `Makan di Warung ($${ECONOMY.mealPrice}, +${ECONOMY.mealHeal} darah)`;
+  if (near(PLACES.gunStore, 7)) {
+    return game.ownsPistol ? 'Toko Besi — pistol sudah dibeli' : `Beli pistol ($${ECONOMY.pistolPrice})`;
+  }
+  if (near(PLACES.garage, 7)) return 'Bengkel Darma — tempat servis';
+  return '';
+}
+
+// Perform the E-key interaction (called from the input handler).
+export function doInteract(game) {
+  const player = game.player;
+  if (player.inCar) return false;
+  const px = player.pos.x;
+  const pz = player.pos.z;
+  const near = (place, r) => Math.hypot(place.x - px, place.z - pz) < r;
+  if (near(PLACES.warung, 7)) {
+    if (game.money < ECONOMY.mealPrice) {
+      game.hud.toast('Uang tidak cukup untuk makan.');
+      return false;
+    }
+    game.money -= ECONOMY.mealPrice;
+    player.health = Math.min(100, player.health + ECONOMY.mealHeal);
+    game.audio.coin();
+    game.hud.toast(`Makan di warung  +${ECONOMY.mealHeal} darah`);
+    return true;
+  }
+  if (near(PLACES.gunStore, 7) && !game.ownsPistol) {
+    if (game.money < ECONOMY.pistolPrice) {
+      game.hud.toast('Uang tidak cukup untuk pistol.');
+      return false;
+    }
+    game.money -= ECONOMY.pistolPrice;
+    game.ownsPistol = true;
+    game.audio.coin();
+    game.hud.toast('Pistol dibeli! Klik kiri untuk menembak.');
+    return true;
+  }
+  return false;
 }

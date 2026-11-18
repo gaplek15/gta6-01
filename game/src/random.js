@@ -1,9 +1,8 @@
-// Seeded random numbers (mulberry32) plus small helpers.
-// One job: every random choice in the game comes from here, so a fixed
-// seed always builds the same city and the same screenshot scenes.
-export function makeRng(seed) {
+// Seeded random numbers (mulberry32) so the world, traffic and screenshot
+// scenes are deterministic: the same seed always builds the same city.
+export function mulberry32(seed) {
   let a = seed >>> 0;
-  return function rng() {
+  return function next() {
     a |= 0;
     a = (a + 0x6d2b79f5) | 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
@@ -12,18 +11,14 @@ export function makeRng(seed) {
   };
 }
 
-export function range(rng, min, max) {
-  return min + rng() * (max - min);
-}
-
-export function int(rng, min, max) {
-  return Math.floor(range(rng, min, max + 1));
-}
-
-export function pick(rng, arr) {
-  return arr[Math.floor(rng() * arr.length)];
-}
-
-export function chance(rng, p) {
-  return rng() < p;
+export function makeRng(seed) {
+  const next = mulberry32(seed);
+  return {
+    next,
+    range(a, b) { return a + (b - a) * next(); },
+    int(a, b) { return Math.floor(a + (b - a + 1) * next()); },
+    pick(arr) { return arr[Math.floor(next() * arr.length)]; },
+    chance(p) { return next() < p; },
+    sign() { return next() < 0.5 ? -1 : 1; },
+  };
 }

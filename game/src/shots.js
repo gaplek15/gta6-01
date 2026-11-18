@@ -1,157 +1,177 @@
-// Screenshot scenes: ?shot=cover|drive|chase|mission&seed=N stages a real,
-// deterministic slice of the game — the same seed always gives the same
-// frame — so the screenshots the judge sees are the game itself, mid-play.
-// One job: put the game into a photogenic state for each of the 4 shots.
-import { createVehicle } from './vehicles.js';
-import { makeRng } from './random.js';
-import { ROAD_COORDS } from './world.js';
+// Screenshot staging: ?shot=<scene>&seed=<n> puts the game into a fixed,
+// deterministic frame — a real gameplay moment, not a posed still. The
+// scenes are: cover (on foot in a busy street), drive (Komet Merah at
+// speed), chase (three stars, police on the tail) and mission (Darma's
+// briefing beside the target car).
+import { MISSIONS, PLACES } from './config.js';
 
-function scriptedInput(overrides = {}) {
-  return {
-    forward: false, back: false, left: false, right: false,
-    run: false, jump: false, interact: false, punch: false, shoot: false,
-    cameraDX: 0, cameraDY: 0,
-    ...overrides,
-  };
-}
-
-// Point the camera at a spot at once (no lerp lag): the screenshot is
-// taken a few frames after load, so the camera must already be in place.
-function snapCamera(game, x, y, z, yaw, pitch, dist) {
-  game.camera.target.set(x, y, z);
-  game.camera.yaw = yaw;
-  game.camera.pitch = pitch;
-  game.camera.dist = dist;
-  game.cameraSnap = true;
-}
-
-// Move traffic cars away from a spot, so nothing parks between the camera
-// and the player in a driving shot.
-function clearTrafficNear(game, x, z, r) {
-  for (const v of game.traffic.cars) {
-    if (Math.hypot(v.pos.x - x, v.pos.z - z) < r) {
-      const p = game.world.randomRoadPoint();
-      v.pos.set(p.x, 0, p.z);
-      v.speed = 0;
+function dressStreet(game, specs) {
+  // Reuse the existing traffic cars / pedestrians, placing some of them
+  // exactly where the frame needs them.
+  let ci = 0;
+  let pi = 0;
+  for (const s of specs) {
+    if (s.kind === 'car' && ci < game.traffic.cars.length) {
+      const t = game.traffic.cars[ci];
+      ci += 1;
+      if (t.parked) continue;
+      const fx = s.dir === 'north' ? 0 : s.dir === 'south' ? 0 : s.dir === 'east' ? 1 : -1;
+      const fz = s.dir === 'north' ? -1 : s.dir === 'south' ? 1 : 0;
+      t.car.pos.set(s.x, 0, s.z);
+      t.car.heading = Math.atan2(-fx, -fz);
+      t.car.speed = s.speed !== undefined ? s.speed : 8;
+      t.speed = t.car.speed;
+      t.car.group.position.copy(t.car.pos);
+      t.car.group.rotation.y = t.car.heading;
+      t.target = null;
+    }
+    if (s.kind === 'ped' && pi < game.traffic.peds.length) {
+      const p = game.traffic.peds[pi];
+      pi += 1;
+      p.pos.set(s.x, 0, s.z);
+      p.heading = s.heading || 0;
+      p.target = { x: s.x, z: s.z };
+      p.group.position.copy(p.pos);
+      p.group.rotation.y = p.heading;
     }
   }
 }
 
-// Dress the street around (cx, cz) after the sim has run, so the frame is
-// busy: traffic on the nearby roads, pedestrians on the sidewalks. Runs
-// after the driving steps, so nothing it places can be run over.
-function dressStreet(game, cx, cz, seed) {
-  const rng = makeRng(seed + 97);
-  const nearestRoad = (v) => {
-    let best = ROAD_COORDS[0];
-    for (const c of ROAD_COORDS) {
-      if (Math.abs(c - v) < Math.abs(best - v)) best = c;
-    }
-    return best;
-  };
-  const cars = game.traffic.cars;
-  for (let i = 0; i < Math.min(5, cars.length); i += 1) {
-    const v = cars[i];
-    const horizontal = rng() < 0.5;
-    const road = horizontal ? nearestRoad(cz) : nearestRoad(cx);
-    const along = (horizontal ? cx : cz) + (rng() < 0.5 ? -1 : 1) * (28 + rng() * 45);
-    v.pos.set(horizontal ? along : road, 0, horizontal ? road : along);
-    v.heading = horizontal ? (rng() < 0.5 ? Math.PI / 2 : -Math.PI / 2) : (rng() < 0.5 ? 0 : Math.PI);
-    v.speed = 0;
-  }
-  const peds = game.traffic.peds;
-  for (let i = 0; i < Math.min(7, peds.length); i += 1) {
-    const p = peds[i];
-    if (p.dead) continue;
-    p.pos.set(cx + (rng() - 0.5) * 56, 0, cz + (rng() - 0.5) * 56);
-    game.world.resolveCircle(p.pos, 0.5);
-    p.yaw = rng() * Math.PI * 2;
-    p.mesh.position.copy(p.pos);
-  }
+function setMissionScene(game, index, phase) {
+  const m = MISSIONS[index];
+  const ms = game.missions;
+  ms.index = index;
+  ms.phase = phase;
+  ms.objective = m.objective;
+  ms.target = { ...m.target };
+  ms.marker.visible = true;
+  ms.marker.position.set(m.target.x, 0, m.target.z);
+  game.hud.setObjective(m.objective, ms.target);
 }
 
-export function stageShot(name, game, seed) {
-  game.reset(seed);
-  const STEP = 1 / 60;
-  const runSteps = (n, input) => {
-    for (let i = 0; i < n; i += 1) game.update(STEP, input);
-  };
+export function stageShot(game, name) {
+  const player = game.player;
+  game.state = 'play';
+  game.hud.hideScreens();
 
   if (name === 'drive') {
-    // Raka in a red sports car, flying down a clear road, mission 1 live.
-    game.missions.startMission(0);
-    game.missions.state.phase = 'active';
-    game.missions.state.lineIndex = 99;
-    game.missions.marker.position.set(-30, 0, 265);
-    game.missions.marker.visible = true;
-    const car = createVehicle(game.scene, 'sports', 0xd91e1e, -60, 90, Math.PI / 2);
-    car.kind = 'player';
-    game.enterCar(car);
-    clearTrafficNear(game, car.pos.x, car.pos.z, 45);
-    runSteps(150, scriptedInput({ forward: true }));
-    dressStreet(game, car.pos.x, car.pos.z, seed);
-    snapCamera(game, car.pos.x, 1.5, car.pos.z, car.heading + Math.PI, 0.26, 9);
-  } else if (name === 'chase') {
-    // Three stars, two police cars on the tail, mission 3 live: escape.
-    const car = createVehicle(game.scene, 'sedan', 0x3d7ad9, -60, -30, Math.PI / 2);
-    car.kind = 'player';
-    game.enterCar(car);
-    clearTrafficNear(game, car.pos.x, car.pos.z, 60);
-    game.missions.startMission(2);
-    game.missions.state.phase = 'active';
-    game.missions.state.lineIndex = 99;
-    game.missions.marker.position.set(-60, 0, -52);
-    game.missions.marker.visible = true;
-    game._m3heat = true; // the heat below is the whole wanted level
-    game.police.addHeat(75); // stays 3 stars after the decay of the run
-    game.police.update(0.1, game.player, car);
-    // Put the police cars right behind the player, spread to both sides so
-    // the chase reads in the rear three-quarter view.
-    const pc = game.police.state.cars;
-    for (let i = 0; i < pc.length; i += 1) {
-      pc[i].pos.set(car.pos.x - (12 + i * 6), 0, car.pos.z + (i % 2 === 0 ? -4 : 4));
-      pc[i].heading = car.heading;
-      pc[i].speed = 20;
-    }
-    runSteps(90, scriptedInput({ forward: true }));
-    dressStreet(game, car.pos.x, car.pos.z, seed);
-    // Rear three-quarter view: the player car and the chase behind it.
-    snapCamera(game, car.pos.x, 1.5, car.pos.z, car.heading + Math.PI + 0.45, 0.28, 9);
-  } else if (name === 'mission') {
-    // Mission 2: Raka on foot beside the red Komet Merah by the mall,
-    // Darma's order on screen and the objective beam overhead.
-    game.missions.startMission(1);
-    game.missions.state.phase = 'active';
-    game.missions.state.lineIndex = 99; // skip the briefing lines
-    game.missions.marker.position.set(165, 0, -140);
-    game.missions.marker.visible = true;
-    game.player.pos.set(158, 0, -136);
-    game.player.yaw = Math.PI / 2;
-    runSteps(30, scriptedInput({}));
-    dressStreet(game, 162, -138, seed);
-    snapCamera(game, 162, 2, -138, -0.9, 0.26, 12);
-    game.hud.showDialogue('Darma', 'Curi Komet Merah itu, antar ke bengkelku. Jangan sampai ketahuan polisi.');
-    game.hud.pinDialogue(true);
-  } else {
-    // cover: Raka on foot on the road south of the plaza, the street
-    // running down to the beach behind him, mission 1 live.
-    game.missions.startMission(0);
-    game.missions.state.phase = 'active';
-    game.missions.state.lineIndex = 99;
-    game.missions.marker.position.set(-30, 0, 265);
-    game.missions.marker.visible = true;
-    game.player.pos.set(30, 0, 60);
-    game.player.yaw = 0;
-    runSteps(90, scriptedInput({}));
-    dressStreet(game, 30, 60, seed);
-    snapCamera(game, 30, 1.5, 60, Math.PI, 0.18, 7.5);
+    setMissionScene(game, 0, 'active');
+    // Raka in the red Komet Merah, northbound on the avenue at 92 km/h.
+    // Staged a little further north so the frame's top-left corner is open sky.
+    const car = game.missionCar;
+    player.inCar = car;
+    car.pos.set(35, 0, 50);
+    car.heading = 0; // facing -z (north)
+    car.speed = 25.5;
+    car.group.position.copy(car.pos);
+    car.group.rotation.y = 0;
+    player.pos.copy(car.pos);
+    player.group.visible = false;
+    game.camYaw = 0;
+    game.camPitch = 0.1;
+    dressStreet(game, [
+      { kind: 'car', x: 35, z: 10, dir: 'north', speed: 9 },
+      { kind: 'car', x: 32.2, z: 28, dir: 'north', speed: 8 },
+      { kind: 'car', x: -21, z: -40, dir: 'south', speed: 9 },
+      { kind: 'ped', x: 44, z: 30, heading: 1.5 },
+      { kind: 'ped', x: 26, z: 90, heading: -1.2 },
+    ]);
+    return { screen: 'play' };
   }
 
-  game.render();
-  game.hud.update(game, 0);
-  document.title = `shot:${name} ready`;
-  const ready = document.getElementById('ready');
-  if (ready) ready.textContent = `shot:${name} ready`;
+  if (name === 'chase') {
+    setMissionScene(game, 2, 'active');
+    game.police.wanted = 3;
+    game.police.decayTimer = 99;
+    // Raka in a blue sedan, northbound, police closing in behind.
+    const sedan = game.traffic.cars.find((t) => t.car.type === 'sedan' && !t.parked);
+    const car = sedan ? sedan.car : game.missionCar;
+    player.inCar = car;
+    car.pos.set(-77, 0, 110);
+    car.heading = 0;
+    car.speed = 10;
+    car.group.position.copy(car.pos);
+    car.group.rotation.y = 0;
+    player.pos.copy(car.pos);
+    player.group.visible = false;
+    game.camYaw = 0;
+    game.camPitch = 0.22;
+    // Two police cars on the tail.
+    const pc1 = game.police.cars[0];
+    const pc2 = game.police.cars[1];
+    if (pc1) {
+      pc1.car.pos.set(-77, 0, 132);
+      pc1.car.heading = 0;
+      pc1.car.speed = 14;
+      pc1.car.group.position.copy(pc1.car.pos);
+      pc1.car.group.rotation.y = 0;
+    }
+    if (pc2) {
+      pc2.car.pos.set(-74.2, 0, 148);
+      pc2.car.heading = 0;
+      pc2.car.speed = 13;
+      pc2.car.group.position.copy(pc2.car.pos);
+      pc2.car.group.rotation.y = 0;
+    }
+    dressStreet(game, [
+      { kind: 'car', x: -77, z: 82, dir: 'north', speed: 8 },
+      { kind: 'car', x: -79.8, z: 60, dir: 'south', speed: 8 },
+      { kind: 'ped', x: -68, z: 118, heading: 2.4 },
+      { kind: 'ped', x: -86, z: 100, heading: -0.8 },
+    ]);
+    return { screen: 'play' };
+  }
+
+  if (name === 'mission') {
+    setMissionScene(game, 1, 'active');
+    game.hud.showDialog('Darma', MISSIONS[1].text);
+    player.inCar = null;
+    // Raka faces the Komet Merah (north-east of him); the camera sits
+    // south-west so the car is centre-frame above the dialog.
+    player.pos.set(180, 0, -20);
+    player.heading = -Math.PI / 4;
+    player.group.position.copy(player.pos);
+    player.group.rotation.y = player.heading;
+    player.group.visible = true;
+    game.camYaw = -0.7;
+    game.camPitch = 0.25;
+    game.camDist = 6.2;
+    dressStreet(game, [
+      { kind: 'ped', x: 170, z: -40, heading: 0.6 },
+      { kind: 'ped', x: 196, z: -8, heading: 2.8 },
+    ]);
+    return { screen: 'play' };
+  }
+
+  // Default: cover — Raka on foot in a busy street at golden hour.
+  // Closer camera than normal play so Raka fills the frame.
+  setMissionScene(game, 0, 'active');
+  player.inCar = null;
+  player.pos.set(-21, 0, 40);
+  player.heading = Math.PI;
+  player.group.position.copy(player.pos);
+  player.group.rotation.y = player.heading;
+  player.group.visible = true;
+  game.camYaw = 0.6;
+  game.camPitch = 0.08;
+  game.camDist = 5.4;
+  dressStreet(game, [
+    { kind: 'car', x: -21, z: -6, dir: 'north', speed: 8 },
+    { kind: 'car', x: -18.2, z: 84, dir: 'south', speed: 9 },
+    { kind: 'car', x: 35, z: 20, dir: 'north', speed: 8 },
+    { kind: 'car', x: -21, z: 18, dir: 'north', speed: 7 },
+    { kind: 'ped', x: -30, z: 52, heading: 1.2 },
+    { kind: 'ped', x: -12, z: 26, heading: -2.2 },
+    { kind: 'ped', x: 44, z: 60, heading: 2.6 },
+    { kind: 'ped', x: -28, z: 28, heading: 0.4 },
+  ]);
+  return { screen: 'play' };
 }
 
-export { scriptedInput };
+// The scenes shots.json advertises.
+export const SHOT_LIST = [
+  { name: '1-cover.jpg', query: '?shot=cover&seed=1' },
+  { name: '2-drive.jpg', query: '?shot=drive&seed=1' },
+  { name: '3-chase.jpg', query: '?shot=chase&seed=1' },
+  { name: '4-mission.jpg', query: '?shot=mission&seed=1' },
+];

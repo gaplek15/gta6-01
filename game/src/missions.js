@@ -1,234 +1,108 @@
-// Missions: three jobs from Darma, in order, with briefing dialogue,
-// objective markers, timers and rewards — plus the story-complete state.
-// One job: give the player a reason to drive across Teluk Cahaya.
+// Missions: a three-job story arc with briefings, objectives, a 3D marker
+// beam, distance tracking and rewards. M1 deliver, M2 steal a car, M3
+// escape a crackdown.
 import * as THREE from 'three';
-import { MISSIONS } from './config.js';
-import { createVehicle } from './vehicles.js';
-import { PLACES } from './world.js';
+import { MISSIONS, ECONOMY } from './config.js';
 
-function makeMarker(scene) {
-  const g = new THREE.Group();
-  const beam = new THREE.Mesh(
-    new THREE.CylinderGeometry(1.2, 1.2, 60, 12, 1, true),
-    new THREE.MeshBasicMaterial({ color: 0xffd94d, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false }),
-  );
+export function createMissions(game) {
+  // Marker beam: a tall translucent column + a spinning diamond.
+  const beamMat = new THREE.MeshBasicMaterial({ color: 0xffd23c, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide });
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 60, 16, 1, true), beamMat);
   beam.position.y = 30;
-  g.add(beam);
   const diamond = new THREE.Mesh(
     new THREE.OctahedronGeometry(1.1),
-    new THREE.MeshLambertMaterial({ color: 0xffd94d, emissive: 0xffd94d, emissiveIntensity: 0.9 }),
+    new THREE.MeshBasicMaterial({ color: 0xffd23c, transparent: true, opacity: 0.9 }),
   );
-  diamond.position.y = 6;
-  g.add(diamond);
-  g.userData.diamond = diamond;
-  g.visible = false;
-  scene.add(g);
-  return g;
-}
-
-export function createMissions(scene, world, rng) {
-  const marker = makeMarker(scene);
-  const state = {
-    index: 0, // 0..2 active, 3 = story complete
-    active: null,
-    phase: 'none', // none | briefing | active | done
-    lineIndex: 0,
-    lineTimer: 0,
-    timer: 0,
-    targetCar: null, // the red Komet Merah in mission 2
-    completed: [],
-    allDone: false,
-  };
-
-  function currentDef() {
-    return MISSIONS[state.index] || null;
-  }
-
-  function setMarker(x, z) {
-    marker.position.set(x, 0, z);
-    marker.visible = true;
-  }
-
-  function hideMarker() {
-    marker.visible = false;
-  }
-
-  function startBriefing() {
-    const def = currentDef();
-    if (!def) return;
-    state.active = def;
-    state.phase = 'briefing';
-    state.lineIndex = 0;
-    state.lineTimer = 0;
-    state.timer = def.timer || 0;
-    // Mission 2 needs the red sports car parked by the mall.
-    if (def.id === 'mobil-pesanan') {
-      const car = createVehicle(scene, 'sports', 0xd91e1e, 165, -140, Math.PI / 2);
-      car.kind = 'parked';
-      car.missionCar = true;
-      state.targetCar = car;
-    }
-    // Mission 3 starts with the police already on the player (main.js
-    // adds the heat when the mission goes active).
-  }
-
-  function startMission(index) {
-    state.index = index;
-    startBriefing();
-  }
-
-  function advanceDialogue() {
-    const def = state.active;
-    if (!def) return;
-    state.lineIndex += 1;
-    state.lineTimer = 0;
-    if (state.lineIndex >= def.briefing.length) {
-      state.phase = 'active';
-      setMarker(def.marker.x, def.marker.z);
-      if (def.id === 'mobil-pesanan') setMarker(165, -140);
-    }
-  }
-
-  function currentLine() {
-    const def = state.active;
-    if (!def || state.phase !== 'briefing') return null;
-    return def.briefing[state.lineIndex] || null;
-  }
-
-  function objectiveText() {
-    if (state.allDone) return 'Kota ini milikmu — jelajahi Teluk Cahaya sesukamu';
-    if (!state.active) return 'Temui Darma untuk pekerjaan pertama';
-    if (state.phase === 'briefing') return 'Dengarkan Darma...';
-    if (state.active.id === 'mobil-pesanan' && !state.stolen) {
-      return 'Curi Komet Merah di Mall Cahaya';
-    }
-    if (state.active.id === 'mobil-pesanan' && state.stolen) {
-      return 'Antar Komet Merah ke Bengkel Darma';
-    }
-    return state.active.objective;
-  }
-
-  function objectivePos() {
-    if (state.allDone || !state.active || state.phase !== 'active') return null;
-    if (state.active.id === 'mobil-pesanan') {
-      return state.stolen ? { x: -180, z: 195 } : { x: 165, z: -140 };
-    }
-    return { x: state.active.marker.x, z: state.active.marker.z };
-  }
-
-  function complete(game) {
-    const def = state.active;
-    state.completed.push(def.id);
-    state.phase = 'done';
-    hideMarker();
-    game.player.money += def.reward;
-    game.player.xp += 100;
-    game.hud.toast(`Misi selesai: ${def.title}  +$${def.reward}`);
-    game.audio.play('mission');
-    if (state.targetCar) {
-      state.targetCar.missionCar = false;
-      state.targetCar = null;
-    }
-    state.index += 1;
-    state.active = null;
-    state.stolen = false;
-    if (state.index >= MISSIONS.length) {
-      state.allDone = true;
-      game.hud.toast('CERITA SELESAI — Teluk Cahaya milikmu sekarang!');
-    } else {
-      // The next job starts after a short breather.
-      state.nextTimer = 4;
-    }
-    game.saveGame();
-  }
-
-  function fail(game, reason) {
-    game.hud.toast(reason);
-    game.audio.play('fail');
-    state.phase = 'briefing';
-    state.lineIndex = 0;
-    state.lineTimer = 0;
-    state.timer = state.active ? state.active.timer || 0 : 0;
-    if (state.targetCar) {
-      state.targetCar.remove();
-      state.targetCar = null;
-    }
-    hideMarker();
-    if (state.active && state.active.id === 'mobil-pesanan') {
-      const car = createVehicle(scene, 'sports', 0xd91e1e, 165, -140, Math.PI / 2);
-      car.kind = 'parked';
-      car.missionCar = true;
-      state.targetCar = car;
-    }
-    state.stolen = false;
-  }
-
-  function update(dt, game) {
-    // Rotate the marker diamond so it catches the eye.
-    if (marker.visible) {
-      marker.userData.diamond.rotation.y += dt * 2;
-      marker.userData.diamond.position.y = 6 + Math.sin(performance.now() / 300) * 0.5;
-    }
-    if (state.nextTimer !== undefined && state.nextTimer > 0) {
-      state.nextTimer -= dt;
-      if (state.nextTimer <= 0) {
-        state.nextTimer = undefined;
-        startBriefing();
-      }
-      return;
-    }
-    const def = state.active;
-    if (!def) return;
-    if (state.phase === 'briefing') {
-      state.lineTimer += dt;
-      if (state.lineTimer > 4.5) advanceDialogue();
-      return;
-    }
-    if (state.phase !== 'active') return;
-    if (state.timer > 0) {
-      state.timer -= dt;
-      if (state.timer <= 0) {
-        fail(game, 'Waktu habis! Misi diulang.');
-        return;
-      }
-    }
-    const playerPos = game.player.inCar ? game.player.inCar.pos : game.player.pos;
-    const target = objectivePos();
-    if (!target) return;
-    const dist = Math.hypot(playerPos.x - target.x, playerPos.z - target.z);
-    if (def.id === 'mobil-pesanan' && !state.stolen) {
-      // Step one: get into the red car.
-      if (game.player.inCar === state.targetCar) {
-        state.stolen = true;
-        setMarker(-180, 195);
-        game.hud.toast('Komet Merah dicuri! Antar ke Bengkel Darma.');
-        game.police.addHeat(25);
-      }
-      return;
-    }
-    if (dist < 6) {
-      // Mission 3 only counts on foot at the warung (hide inside).
-      if (def.id === 'kabur-dari-razia' && game.player.inCar) {
-        game.hud.toast('Turun dari mobil dan masuk ke warung!');
-        return;
-      }
-      complete(game);
-    }
-  }
+  diamond.position.y = 4.5;
+  const group = new THREE.Group();
+  group.add(beam, diamond);
+  group.visible = false;
+  game.scene.add(group);
 
   return {
-    state,
-    currentDef,
-    currentLine,
-    objectiveText,
-    objectivePos,
-    startMission,
-    advanceDialogue,
-    complete,
-    fail,
-    update,
-    marker,
+    index: 0,
+    phase: 'idle', // idle | briefing | active | deliver | done
+    target: null,
+    objective: '',
+    marker: group,
+    diamond,
+    elapsed: 0,
   };
 }
 
-export { PLACES };
+export function startMissions(game) {
+  beginMission(game, 0);
+}
+
+export function beginMission(game, i) {
+  const m = MISSIONS[i];
+  const ms = game.missions;
+  ms.index = i;
+  ms.phase = 'briefing';
+  ms.objective = m.objective;
+  ms.target = { ...m.target };
+  ms.marker.visible = true;
+  ms.marker.position.set(m.target.x, 0, m.target.z);
+  game.hud.showDialog(m.briefing, m.text);
+  if (m.wantedOnStart) game.police.addWanted(m.wantedOnStart);
+  game.hud.setObjective(m.objective, ms.target);
+}
+
+function completeMission(game) {
+  const m = MISSIONS[game.missions.index];
+  game.money += m.reward;
+  game.addXp(ECONOMY.xpPerMission);
+  game.audio.missionComplete();
+  game.hud.toast(`Misi selesai: ${m.title}  +$${m.reward}`);
+  game.saveGame();
+  const next = game.missions.index + 1;
+  if (next >= MISSIONS.length) {
+    game.missions.phase = 'done';
+    game.missions.objective = 'Cerita selesai — Teluk Cahaya milikmu!';
+    game.missions.target = null;
+    game.missions.marker.visible = false;
+    game.hud.setObjective(game.missions.objective, null);
+    game.hud.showDialog('Darma', 'Kerja bagus, Raka. Teluk Cahaya sekarang kenal namamu. Istirahat dulu di warung — besok ada kerjaan lagi.');
+  } else {
+    beginMission(game, next);
+  }
+}
+
+export function updateMissions(game, dt) {
+  const ms = game.missions;
+  ms.elapsed += dt;
+  if (ms.marker.visible) {
+    ms.diamond.rotation.y += dt * 2.2;
+    ms.diamond.position.y = 4.5 + Math.sin(ms.elapsed * 2) * 0.6;
+  }
+  if (ms.phase === 'done' || ms.phase === 'idle') return;
+  const player = game.player;
+  const px = player.inCar ? player.inCar.pos.x : player.pos.x;
+  const pz = player.inCar ? player.inCar.pos.z : player.pos.z;
+
+  // Mission 2: stealing the Komet Merah switches to the delivery leg.
+  if (ms.phase === 'active' && MISSIONS[ms.index].id === 'mobil-pesanan') {
+    if (player.inCar === game.missionCar) {
+      ms.phase = 'deliver';
+      ms.objective = MISSIONS[ms.index].deliverObjective;
+      ms.target = { ...MISSIONS[ms.index].deliver };
+      ms.marker.position.set(ms.target.x, 0, ms.target.z);
+      game.hud.setObjective(ms.objective, ms.target);
+      game.hud.toast('Komet Merah dicuri! Antar ke Bengkel Darma.');
+      game.police.addWanted(1);
+    }
+  }
+
+  if (!ms.target) return;
+  const d = Math.hypot(ms.target.x - px, ms.target.z - pz);
+  game.hud.setObjectiveDistance(d);
+  const arriveRadius = ms.phase === 'deliver' ? 10 : 9;
+  if (d < arriveRadius) {
+    // Mission 2's first leg only counts once the car is stolen.
+    if (ms.phase === 'active' && MISSIONS[ms.index].id === 'mobil-pesanan') {
+      game.hud.setPrompt('Tekan E untuk mencuri Komet Merah');
+      return;
+    }
+    completeMission(game);
+  }
+}

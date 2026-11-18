@@ -1,177 +1,246 @@
-// Raka, on foot: a person with real proportions — capsule torso and
-// limbs, a round head, shoes, and a cap — never a stack of boxes.
-// One job: move the hero around the city and let him fight back.
+// The player on foot: a properly proportioned character (capsule limbs
+// pivoted at the joints, torso, head with cap), walk/run/jump, punch and
+// pistol combat, entering and exiting cars, and the third-person camera.
 import * as THREE from 'three';
-import { PLAYER } from './config.js';
+import { TUNE } from './config.js';
 import { limb } from './shapes.js';
 
-const SHIRT_COLORS = [0x3d7ad9, 0xd94f3d, 0x3d9a5a, 0xe8a83d];
-
-function lambert(color) {
-  return new THREE.MeshLambertMaterial({ color });
+function skinMat() {
+  return new THREE.MeshStandardMaterial({ color: 0xc98a5e, roughness: 0.75 });
+}
+function clothMat(color) {
+  return new THREE.MeshStandardMaterial({ color, roughness: 0.9 });
 }
 
-export function makePersonMesh(shirt, skin = 0xc98a5a, pants = 0x2c3e50, capColor = null) {
-  const g = new THREE.Group();
-  const shirtMat = lambert(shirt);
-  const skinMat = lambert(skin);
-  const pantsMat = lambert(pants);
+export function createPlayer(game) {
+  const group = new THREE.Group();
+  const skin = skinMat();
+  const shirt = clothMat(0xe86a1a); // Raka's orange ojek shirt
+  const pants = clothMat(0x2c3e50);
+  const capMat = clothMat(0xc0392b);
 
-  // Legs: capsules pivoted at the hips, with rounded shoes.
-  const legL = limb(0.085, 0.55, pantsMat);
-  legL.position.set(-0.11, 0.86, 0);
-  const shoeL = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.09, 0.32), lambert(0x2a2320));
-  shoeL.position.set(0, -0.82, 0.05);
-  shoeL.castShadow = true;
-  legL.add(shoeL);
-  g.add(legL);
-  const legR = limb(0.085, 0.55, pantsMat);
-  legR.position.set(0.11, 0.86, 0);
-  const shoeR = shoeL.clone();
-  legR.add(shoeR);
-  g.add(legR);
-
-  // Torso: a capsule, slightly wider at the shoulders via a second short
-  // capsule, so the silhouette reads as a person, not a tube.
-  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.2, 0.42, 4, 12), shirtMat);
-  body.position.y = 1.16;
-  body.castShadow = true;
-  g.add(body);
-  const shoulders = new THREE.Mesh(new THREE.SphereGeometry(0.21, 12, 8), shirtMat);
-  shoulders.position.y = 1.42;
-  shoulders.scale.set(1.15, 0.6, 0.8);
-  shoulders.castShadow = true;
-  g.add(shoulders);
-
-  // Arms: capsules pivoted at the shoulders, small round hands.
-  const armL = limb(0.065, 0.42, shirtMat);
-  armL.position.set(-0.27, 1.44, 0);
-  const handL = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 8), skinMat);
-  handL.position.y = -0.55;
-  armL.add(handL);
-  g.add(armL);
-  const armR = limb(0.065, 0.42, shirtMat);
-  armR.position.set(0.27, 1.44, 0);
-  const handR = handL.clone();
-  armR.add(handR);
-  g.add(armR);
-
-  // Head: a round head with a neck, hair, and an optional cap with a brim.
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.12, 10), skinMat);
-  neck.position.y = 1.52;
-  g.add(neck);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.15, 14, 12), skinMat);
-  head.position.y = 1.66;
+  const legL = limb(0.14, 0.55, pants);
+  legL.position.set(-0.16, 0.78, 0);
+  const legR = limb(0.14, 0.55, pants);
+  legR.position.set(0.16, 0.78, 0);
+  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.26, 0.42, 4, 12), shirt);
+  torso.position.y = 1.18;
+  torso.castShadow = true;
+  const armL = limb(0.11, 0.5, shirt);
+  armL.position.set(-0.34, 1.48, 0);
+  const armR = limb(0.11, 0.5, shirt);
+  armR.position.set(0.34, 1.48, 0);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.21, 16, 12), skin);
+  head.position.y = 1.72;
   head.castShadow = true;
-  g.add(head);
-  const hair = new THREE.Mesh(
-    new THREE.SphereGeometry(0.155, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.55),
-    lambert(0x241a12),
-  );
-  hair.position.set(0, 1.68, -0.015);
-  g.add(hair);
-  if (capColor !== null) {
-    const capMat = lambert(capColor);
-    const cap = new THREE.Mesh(
-      new THREE.SphereGeometry(0.16, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.5),
-      capMat,
-    );
-    cap.position.y = 1.7;
-    g.add(cap);
-    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.025, 14), capMat);
-    brim.position.set(0, 1.7, 0.1);
-    brim.scale.set(1, 1, 1.25);
-    g.add(brim);
-  }
-  g.userData = { legL, legR, armL, armR, body, head };
-  return g;
-}
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.22, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2.2), capMat);
+  cap.position.y = 1.76;
+  const brim = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.04, 0.2), capMat);
+  brim.position.set(0, 1.78, -0.2);
+  // Small backpack (ojek rider's delivery bag).
+  const bag = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.5, 0.18), clothMat(0x1e8449));
+  bag.position.set(0, 1.2, 0.3);
+  bag.castShadow = true;
 
-export function createPlayer(scene, x, z) {
-  // Raka stands out: an orange shirt and a red cap, so the player is never
-  // mistaken for a pedestrian.
-  const mesh = makePersonMesh(0xff8c1a, 0xc98a5a, 0x2c3e50, 0xd94f3d);
-  mesh.position.set(x, 0, z);
-  scene.add(mesh);
-  const p = {
-    mesh,
-    pos: mesh.position,
-    yaw: 0,
+  group.add(legL, legR, torso, armL, armR, head, cap, brim, bag);
+  group.traverse((m) => { if (m.isMesh) m.castShadow = true; });
+
+  const player = {
+    group,
+    parts: { legL, legR, armL, armR, torso, head },
+    pos: new THREE.Vector3(0, 0, 0),
     vy: 0,
-    grounded: true,
-    health: PLAYER.maxHealth,
-    money: 0,
-    walkPhase: 0,
-    punchTimer: 0,
-    punchCooldown: 0,
-    hurtTimer: 0,
-    pistol: false,
-    ammo: 0,
+    heading: 0,
+    onGround: true,
     inCar: null,
-    xp: 0,
-    remove() { scene.remove(mesh); },
+    health: 100,
+    walkPhase: 0,
+    punchCooldown: 0,
+    shootCooldown: 0,
   };
-  return p;
+  game.scene.add(group);
+  return player;
 }
 
-// Move on foot. `move` is {x, z} in world space (already camera-relative),
-// `run` and `jump` are booleans. Returns distance moved.
-export function walkPlayer(p, dt, move, run, jump, world) {
-  const speed = run ? PLAYER.runSpeed : PLAYER.walkSpeed;
-  const mx = move.x;
-  const mz = move.z;
+// Move on foot. `input` carries WASD relative to the camera yaw; the camera
+// yaw lives on game.camYaw and is driven by the mouse.
+export function updatePlayer(game, dt) {
+  const p = game.player;
+  const input = game.input;
+  if (p.inCar) return; // driving is handled by vehicles.js
+
+  const speed = input.run ? TUNE.runSpeed : TUNE.walkSpeed;
+  const yaw = game.camYaw;
+  // Camera-relative movement: W = away from the camera.
+  let mx = 0;
+  let mz = 0;
+  if (input.forward) { mx += -Math.sin(yaw); mz += -Math.cos(yaw); }
+  if (input.back) { mx += Math.sin(yaw); mz += Math.cos(yaw); }
+  if (input.left) { mx += -Math.cos(yaw); mz += Math.sin(yaw); }
+  if (input.right) { mx += Math.cos(yaw); mz += -Math.sin(yaw); }
   const len = Math.hypot(mx, mz);
-  let moved = 0;
   if (len > 0.01) {
-    const nx = (mx / len) * speed * dt;
-    const nz = (mz / len) * speed * dt;
-    p.pos.x += nx;
-    p.pos.z += nz;
-    moved = Math.hypot(nx, nz);
-    p.yaw = Math.atan2(mx, mz);
-    p.walkPhase += dt * (run ? 13 : 9);
+    mx /= len;
+    mz /= len;
+    p.pos.x += mx * speed * dt;
+    p.pos.z += mz * speed * dt;
+    const targetHeading = Math.atan2(mx, mz) + Math.PI;
+    // Face the movement direction (character forward is local -Z).
+    let d = targetHeading - p.heading;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    p.heading += d * Math.min(1, dt * 12);
+    p.walkPhase += dt * speed * 1.9;
+    const swing = Math.sin(p.walkPhase) * (input.run ? 0.75 : 0.55);
+    p.parts.legL.rotation.x = swing;
+    p.parts.legR.rotation.x = -swing;
+    p.parts.armL.rotation.x = -swing * 0.8;
+    p.parts.armR.rotation.x = swing * 0.8;
+  } else {
+    p.parts.legL.rotation.x *= 0.8;
+    p.parts.legR.rotation.x *= 0.8;
+    p.parts.armL.rotation.x *= 0.8;
+    p.parts.armR.rotation.x *= 0.8;
   }
-  if (jump && p.grounded) {
-    p.vy = PLAYER.jumpSpeed;
-    p.grounded = false;
+
+  // Jump + gravity.
+  if (input.jump && p.onGround) {
+    p.vy = TUNE.jumpSpeed;
+    p.onGround = false;
   }
-  if (!p.grounded) {
-    p.vy -= PLAYER.gravity * dt;
+  if (!p.onGround) {
+    p.vy -= TUNE.gravity * dt;
     p.pos.y += p.vy * dt;
     if (p.pos.y <= 0) {
       p.pos.y = 0;
       p.vy = 0;
-      p.grounded = true;
+      p.onGround = true;
     }
   }
-  world.resolveCircle(p.pos, PLAYER.radius);
-  p.mesh.position.copy(p.pos);
-  p.mesh.rotation.y = p.yaw;
-  // Walk swing: legs and arms counter-swing with the walk phase.
-  const swing = len > 0.01 ? Math.sin(p.walkPhase) * (run ? 0.8 : 0.55) : 0;
-  const u = p.mesh.userData;
-  u.legL.rotation.x = swing;
-  u.legR.rotation.x = -swing;
-  u.armL.rotation.x = -swing * 0.8;
-  u.armR.rotation.x = swing * 0.8;
-  if (p.punchTimer > 0) {
-    p.punchTimer -= dt;
-    u.armR.rotation.x = -1.6 * Math.min(1, p.punchTimer * 4);
+
+  // Collisions + bounds.
+  const [cx, cz] = game.world.collide(p.pos.x, p.pos.z, 0.55);
+  p.pos.x = cx;
+  p.pos.z = cz;
+  const b = game.world.bounds;
+  p.pos.x = Math.max(b.minX, Math.min(b.maxX, p.pos.x));
+  p.pos.z = Math.max(b.minZ, Math.min(b.maxZ, p.pos.z));
+
+  p.group.position.copy(p.pos);
+  p.group.rotation.y = p.heading;
+
+  p.punchCooldown = Math.max(0, p.punchCooldown - dt);
+  p.shootCooldown = Math.max(0, p.shootCooldown - dt);
+}
+
+// Third-person camera: behind the player on foot, behind the car when
+// driving, smoothed. Mouse orbit adjusts game.camYaw / game.camPitch.
+export function updateCamera(game, dt) {
+  const cam = game.camera;
+  const p = game.player;
+  let target;
+  let dist;
+  let height;
+  let lookAt;
+  if (p.inCar) {
+    const car = p.inCar;
+    const fx = -Math.sin(car.heading);
+    const fz = -Math.cos(car.heading);
+    target = new THREE.Vector3(car.pos.x - fx * 9.5, 3.6, car.pos.z - fz * 9.5);
+    lookAt = new THREE.Vector3(car.pos.x + fx * 6, 1.2, car.pos.z + fz * 6);
+    dist = 0;
+    height = 0;
+  } else {
+    const yaw = game.camYaw;
+    const pitch = game.camPitch;
+    dist = game.camDist || 7.2;
+    height = 2.6 + pitch * 3.2;
+    target = new THREE.Vector3(
+      p.pos.x + Math.sin(yaw) * dist,
+      p.pos.y + height,
+      p.pos.z + Math.cos(yaw) * dist,
+    );
+    lookAt = new THREE.Vector3(p.pos.x, p.pos.y + 1.4, p.pos.z);
   }
-  if (p.punchCooldown > 0) p.punchCooldown -= dt;
-  if (p.hurtTimer > 0) p.hurtTimer -= dt;
-  return moved;
+  const k = 1 - Math.exp(-dt * 7);
+  cam.position.lerp(target, k);
+  cam.lookAt(lookAt);
+  game.scene.userData.cameraPosition = cam.position;
 }
 
-export function damagePlayer(p, amount) {
-  if (p.hurtTimer > 0) return false;
-  p.health = Math.max(0, p.health - amount);
-  p.hurtTimer = 0.6;
-  return true;
+// Punch: damage the nearest pedestrian or cop in front of the player.
+export function tryPunch(game) {
+  const p = game.player;
+  if (p.punchCooldown > 0 || p.inCar) return false;
+  p.punchCooldown = 0.45;
+  p.parts.armR.rotation.x = -1.6;
+  const fx = -Math.sin(p.heading);
+  const fz = -Math.cos(p.heading);
+  let best = null;
+  let bestD = TUNE.punchRange;
+  for (const ped of game.traffic.peds) {
+    if (ped.fled) continue;
+    const dx = ped.pos.x - p.pos.x;
+    const dz = ped.pos.z - p.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d < bestD && (dx * fx + dz * fz) > 0) { best = ped; bestD = d; }
+  }
+  for (const cop of game.police.cops) {
+    const dx = cop.pos.x - p.pos.x;
+    const dz = cop.pos.z - p.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d < bestD && (dx * fx + dz * fz) > 0) { best = cop; bestD = d; }
+  }
+  if (best) {
+    best.health -= TUNE.punchDamage;
+    best.stagger = 0.6;
+    game.police.addWanted(1);
+    game.audio.punch();
+    if (best.health <= 0) {
+      best.down = true;
+      best.group.visible = false;
+    }
+    return true;
+  }
+  game.audio.punch();
+  return false;
 }
 
-export function healPlayer(p, amount) {
-  p.health = Math.min(PLAYER.maxHealth, p.health + amount);
+// Pistol: hit the nearest ped/cop/car roughly under the crosshair.
+export function tryShoot(game) {
+  const p = game.player;
+  if (p.shootCooldown > 0 || p.inCar || !game.ownsPistol) return false;
+  p.shootCooldown = 0.28;
+  game.audio.gunshot();
+  const fx = -Math.sin(game.camYaw);
+  const fz = -Math.cos(game.camYaw);
+  let best = null;
+  let bestD = TUNE.pistolRange;
+  let bestKind = '';
+  const consider = (x, z, obj, kind) => {
+    const dx = x - p.pos.x;
+    const dz = z - p.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d > bestD) return;
+    const dot = (dx * fx + dz * fz) / (d || 1);
+    if (dot > 0.965) { best = obj; bestD = d; bestKind = kind; }
+  };
+  for (const ped of game.traffic.peds) if (!ped.down) consider(ped.pos.x, ped.pos.z, ped, 'ped');
+  for (const cop of game.police.cops) if (!cop.down) consider(cop.pos.x, cop.pos.z, cop, 'cop');
+  for (const car of game.traffic.cars) consider(car.pos.x, car.pos.z, car, 'car');
+  if (best) {
+    if (bestKind === 'car') {
+      best.speed = Math.max(0, best.speed - 6);
+    } else {
+      best.health -= TUNE.pistolDamage;
+      best.stagger = 0.8;
+      if (best.health <= 0) {
+        best.down = true;
+        best.group.visible = false;
+      }
+    }
+    game.police.addWanted(bestKind === 'cop' ? 2 : 1);
+    return true;
+  }
+  return false;
 }
-
-export { SHIRT_COLORS };
