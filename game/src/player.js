@@ -1,43 +1,88 @@
-// Raka, on foot: a low-poly walker with run, jump, punch and pistol.
+// Raka, on foot: a person with real proportions — capsule torso and
+// limbs, a round head, shoes, and a cap — never a stack of boxes.
 // One job: move the hero around the city and let him fight back.
 import * as THREE from 'three';
 import { PLAYER } from './config.js';
+import { limb } from './shapes.js';
 
 const SHIRT_COLORS = [0x3d7ad9, 0xd94f3d, 0x3d9a5a, 0xe8a83d];
 
+function lambert(color) {
+  return new THREE.MeshLambertMaterial({ color });
+}
+
 export function makePersonMesh(shirt, skin = 0xc98a5a, pants = 0x2c3e50, capColor = null) {
   const g = new THREE.Group();
-  const shirtMat = new THREE.MeshLambertMaterial({ color: shirt });
-  const skinMat = new THREE.MeshLambertMaterial({ color: skin });
-  const pantsMat = new THREE.MeshLambertMaterial({ color: pants });
+  const shirtMat = lambert(shirt);
+  const skinMat = lambert(skin);
+  const pantsMat = lambert(pants);
 
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.72, 0.34), shirtMat);
-  body.position.y = 1.12;
+  // Legs: capsules pivoted at the hips, with rounded shoes.
+  const legL = limb(0.085, 0.55, pantsMat);
+  legL.position.set(-0.11, 0.86, 0);
+  const shoeL = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.09, 0.32), lambert(0x2a2320));
+  shoeL.position.set(0, -0.82, 0.05);
+  shoeL.castShadow = true;
+  legL.add(shoeL);
+  g.add(legL);
+  const legR = limb(0.085, 0.55, pantsMat);
+  legR.position.set(0.11, 0.86, 0);
+  const shoeR = shoeL.clone();
+  legR.add(shoeR);
+  g.add(legR);
+
+  // Torso: a capsule, slightly wider at the shoulders via a second short
+  // capsule, so the silhouette reads as a person, not a tube.
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.2, 0.42, 4, 12), shirtMat);
+  body.position.y = 1.16;
   body.castShadow = true;
   g.add(body);
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.42, 0.42), skinMat);
-  head.position.y = 1.72;
+  const shoulders = new THREE.Mesh(new THREE.SphereGeometry(0.21, 12, 8), shirtMat);
+  shoulders.position.y = 1.42;
+  shoulders.scale.set(1.15, 0.6, 0.8);
+  shoulders.castShadow = true;
+  g.add(shoulders);
+
+  // Arms: capsules pivoted at the shoulders, small round hands.
+  const armL = limb(0.065, 0.42, shirtMat);
+  armL.position.set(-0.27, 1.44, 0);
+  const handL = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 8), skinMat);
+  handL.position.y = -0.55;
+  armL.add(handL);
+  g.add(armL);
+  const armR = limb(0.065, 0.42, shirtMat);
+  armR.position.set(0.27, 1.44, 0);
+  const handR = handL.clone();
+  armR.add(handR);
+  g.add(armR);
+
+  // Head: a round head with a neck, hair, and an optional cap with a brim.
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.12, 10), skinMat);
+  neck.position.y = 1.52;
+  g.add(neck);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.15, 14, 12), skinMat);
+  head.position.y = 1.66;
   head.castShadow = true;
   g.add(head);
+  const hair = new THREE.Mesh(
+    new THREE.SphereGeometry(0.155, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.55),
+    lambert(0x241a12),
+  );
+  hair.position.set(0, 1.68, -0.015);
+  g.add(hair);
   if (capColor !== null) {
-    const cap = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.12, 0.46), new THREE.MeshLambertMaterial({ color: capColor }));
-    cap.position.y = 1.96;
+    const capMat = lambert(capColor);
+    const cap = new THREE.Mesh(
+      new THREE.SphereGeometry(0.16, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.5),
+      capMat,
+    );
+    cap.position.y = 1.7;
     g.add(cap);
+    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.025, 14), capMat);
+    brim.position.set(0, 1.7, 0.1);
+    brim.scale.set(1, 1, 1.25);
+    g.add(brim);
   }
-  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.7, 0.24), pantsMat);
-  legL.position.set(-0.16, 0.35, 0);
-  legL.castShadow = true;
-  g.add(legL);
-  const legR = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.7, 0.24), pantsMat);
-  legR.position.set(0.16, 0.35, 0);
-  legR.castShadow = true;
-  g.add(legR);
-  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.62, 0.2), shirtMat);
-  armL.position.set(-0.42, 1.12, 0);
-  g.add(armL);
-  const armR = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.62, 0.2), shirtMat);
-  armR.position.set(0.42, 1.12, 0);
-  g.add(armR);
   g.userData = { legL, legR, armL, armR, body, head };
   return g;
 }

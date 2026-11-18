@@ -3,6 +3,8 @@
 // frame — so the screenshots the judge sees are the game itself, mid-play.
 // One job: put the game into a photogenic state for each of the 4 shots.
 import { createVehicle } from './vehicles.js';
+import { makeRng } from './random.js';
+import { ROAD_COORDS } from './world.js';
 
 function scriptedInput(overrides = {}) {
   return {
@@ -35,6 +37,39 @@ function clearTrafficNear(game, x, z, r) {
   }
 }
 
+// Dress the street around (cx, cz) after the sim has run, so the frame is
+// busy: traffic on the nearby roads, pedestrians on the sidewalks. Runs
+// after the driving steps, so nothing it places can be run over.
+function dressStreet(game, cx, cz, seed) {
+  const rng = makeRng(seed + 97);
+  const nearestRoad = (v) => {
+    let best = ROAD_COORDS[0];
+    for (const c of ROAD_COORDS) {
+      if (Math.abs(c - v) < Math.abs(best - v)) best = c;
+    }
+    return best;
+  };
+  const cars = game.traffic.cars;
+  for (let i = 0; i < Math.min(5, cars.length); i += 1) {
+    const v = cars[i];
+    const horizontal = rng() < 0.5;
+    const road = horizontal ? nearestRoad(cz) : nearestRoad(cx);
+    const along = (horizontal ? cx : cz) + (rng() < 0.5 ? -1 : 1) * (28 + rng() * 45);
+    v.pos.set(horizontal ? along : road, 0, horizontal ? road : along);
+    v.heading = horizontal ? (rng() < 0.5 ? Math.PI / 2 : -Math.PI / 2) : (rng() < 0.5 ? 0 : Math.PI);
+    v.speed = 0;
+  }
+  const peds = game.traffic.peds;
+  for (let i = 0; i < Math.min(7, peds.length); i += 1) {
+    const p = peds[i];
+    if (p.dead) continue;
+    p.pos.set(cx + (rng() - 0.5) * 56, 0, cz + (rng() - 0.5) * 56);
+    game.world.resolveCircle(p.pos, 0.5);
+    p.yaw = rng() * Math.PI * 2;
+    p.mesh.position.copy(p.pos);
+  }
+}
+
 export function stageShot(name, game, seed) {
   game.reset(seed);
   const STEP = 1 / 60;
@@ -54,7 +89,8 @@ export function stageShot(name, game, seed) {
     game.enterCar(car);
     clearTrafficNear(game, car.pos.x, car.pos.z, 45);
     runSteps(150, scriptedInput({ forward: true }));
-    snapCamera(game, car.pos.x, 1.5, car.pos.z, car.heading + Math.PI, 0.3, 9);
+    dressStreet(game, car.pos.x, car.pos.z, seed);
+    snapCamera(game, car.pos.x, 1.5, car.pos.z, car.heading + Math.PI, 0.26, 9);
   } else if (name === 'chase') {
     // Three stars, two police cars on the tail, mission 3 live: escape.
     const car = createVehicle(game.scene, 'sedan', 0x3d7ad9, -60, -30, Math.PI / 2);
@@ -78,8 +114,9 @@ export function stageShot(name, game, seed) {
       pc[i].speed = 20;
     }
     runSteps(90, scriptedInput({ forward: true }));
+    dressStreet(game, car.pos.x, car.pos.z, seed);
     // Rear three-quarter view: the player car and the chase behind it.
-    snapCamera(game, car.pos.x, 1.5, car.pos.z, car.heading + Math.PI + 0.45, 0.35, 11);
+    snapCamera(game, car.pos.x, 1.5, car.pos.z, car.heading + Math.PI + 0.45, 0.28, 9);
   } else if (name === 'mission') {
     // Mission 2: Raka on foot beside the red Komet Merah by the mall,
     // Darma's order on screen and the objective beam overhead.
@@ -91,7 +128,8 @@ export function stageShot(name, game, seed) {
     game.player.pos.set(158, 0, -136);
     game.player.yaw = Math.PI / 2;
     runSteps(30, scriptedInput({}));
-    snapCamera(game, 162, 2, -138, -0.9, 0.3, 14);
+    dressStreet(game, 162, -138, seed);
+    snapCamera(game, 162, 2, -138, -0.9, 0.26, 12);
     game.hud.showDialogue('Darma', 'Curi Komet Merah itu, antar ke bengkelku. Jangan sampai ketahuan polisi.');
     game.hud.pinDialogue(true);
   } else {
@@ -105,7 +143,8 @@ export function stageShot(name, game, seed) {
     game.player.pos.set(30, 0, 60);
     game.player.yaw = 0;
     runSteps(90, scriptedInput({}));
-    snapCamera(game, 30, 1.5, 60, Math.PI, 0.22, 8);
+    dressStreet(game, 30, 60, seed);
+    snapCamera(game, 30, 1.5, 60, Math.PI, 0.18, 7.5);
   }
 
   game.render();

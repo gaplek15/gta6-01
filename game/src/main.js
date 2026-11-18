@@ -42,13 +42,87 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87b8d9);
-scene.fog = new THREE.Fog(0x9fc3d8, 120, 520);
+scene.background = new THREE.Color(0x8ec4ea); // fallback if the sky dome fails
+scene.fog = new THREE.Fog(0xe8d3ae, 150, 620); // warm haze at the horizon
+
+// The sky, all procedural: a gradient dome (deep blue overhead, warm gold
+// at the horizon), a glowing sun disc, and soft drifting clouds — no
+// external files, so it looks the same offline.
+const sunDir = new THREE.Vector3(0.72, 0.42, 0.38).normalize();
+const skyMat = new THREE.ShaderMaterial({
+  side: THREE.BackSide,
+  depthWrite: false,
+  fog: false,
+  uniforms: {
+    topColor: { value: new THREE.Color(0x3f7fd0) },
+    midColor: { value: new THREE.Color(0x8ec4ea) },
+    horizonColor: { value: new THREE.Color(0xffd9a6) },
+    sunColor: { value: new THREE.Color(0xfff0c0) },
+    sunDir: { value: sunDir },
+  },
+  vertexShader: `
+    varying vec3 vDir;
+    void main() {
+      vDir = normalize(position);
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      gl_Position = projectionMatrix * mv;
+      gl_Position.z = gl_Position.w;
+    }`,
+  fragmentShader: `
+    varying vec3 vDir;
+    uniform vec3 topColor, midColor, horizonColor, sunColor;
+    uniform vec3 sunDir;
+    void main() {
+      float h = clamp(vDir.y, -0.1, 1.0);
+      vec3 col = mix(horizonColor, midColor, smoothstep(0.0, 0.22, h));
+      col = mix(col, topColor, smoothstep(0.18, 0.65, h));
+      float s = max(dot(normalize(vDir), normalize(sunDir)), 0.0);
+      col += sunColor * (pow(s, 600.0) * 1.2 + pow(s, 24.0) * 0.35 + pow(s, 6.0) * 0.12);
+      gl_FragColor = vec4(col, 1.0);
+    }`,
+});
+const sky = new THREE.Mesh(new THREE.SphereGeometry(950, 32, 16), skyMat);
+sky.renderOrder = -1;
+sky.frustumCulled = false;
+scene.add(sky);
+
+// Soft clouds: canvas-drawn puffs on sprites, drifting slowly.
+function makeCloudTexture() {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 128;
+  const g = c.getContext('2d');
+  const puffs = [[70, 80, 55], [130, 65, 65], [190, 85, 50], [110, 90, 45], [160, 95, 40]];
+  for (const [x, y, r] of puffs) {
+    const grad = g.createRadialGradient(x, y, 2, x, y, r);
+    grad.addColorStop(0, 'rgba(255,255,255,0.85)');
+    grad.addColorStop(0.6, 'rgba(255,255,255,0.45)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grad;
+    g.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const clouds = [];
+{
+  const cloudTex = makeCloudTexture();
+  const cloudRng = makeRng(CITY.seed + 41);
+  for (let i = 0; i < 9; i += 1) {
+    const mat = new THREE.SpriteMaterial({ map: cloudTex, transparent: true, opacity: 0.85, depthWrite: false, fog: false });
+    const spr = new THREE.Sprite(mat);
+    spr.position.set(-600 + cloudRng() * 1200, 140 + cloudRng() * 80, -600 + cloudRng() * 1200);
+    spr.scale.set(140 + cloudRng() * 120, 45 + cloudRng() * 25, 1);
+    scene.add(spr);
+    clouds.push(spr);
+  }
+}
 
 const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 1200);
 
-// Sun + sky light.
-const sun = new THREE.DirectionalLight(0xfff2d0, 2.4);
+// Golden-hour sun: warm, low, long shadows.
+const sun = new THREE.DirectionalLight(0xffd9a0, 2.6);
 sun.castShadow = true;
 sun.shadow.mapSize.set(1024, 1024);
 sun.shadow.camera.left = -70;
@@ -58,10 +132,10 @@ sun.shadow.camera.bottom = -70;
 sun.shadow.camera.far = 400;
 scene.add(sun);
 scene.add(sun.target);
-const hemi = new THREE.HemisphereLight(0xbfe3ff, 0xa89a7a, 1.35);
+const hemi = new THREE.HemisphereLight(0xbfd9ff, 0x8a7a5a, 1.15);
 scene.add(hemi);
 // A little ambient lift so shadowed streets never read as a black void.
-const ambient = new THREE.AmbientLight(0xffffff, 0.35);
+const ambient = new THREE.AmbientLight(0xffffff, 0.3);
 scene.add(ambient);
 
 // Build the game object: every system, one handle.
@@ -155,7 +229,7 @@ function enterCar(car) {
   player.inCar = car;
   car.kind = 'player';
   player.mesh.visible = false;
-  game.camera.dist = 11;
+  game.camera.dist = 10.5;
   audio.play('click');
 }
 
@@ -171,7 +245,7 @@ function exitCar() {
   game.parked = game.parked || [];
   game.parked.push(car);
   player.mesh.visible = true;
-  game.camera.dist = 8;
+  game.camera.dist = 7.5;
   audio.play('click');
 }
 
@@ -555,10 +629,15 @@ function updateCamera(dt) {
     camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 3);
     camera.updateProjectionMatrix();
   }
-  // The sun follows the player so shadows stay crisp.
-  sun.position.set(target.x + 80, 140, target.z + 60);
+  // The sun follows the player so shadows stay crisp; low and warm for
+  // long golden-hour shadows. Clouds drift with the wind.
+  sun.position.set(target.x + 130, 95, target.z + 55);
   sun.target.position.set(target.x, 0, target.z);
   sun.target.updateMatrixWorld();
+  for (const c of clouds) {
+    c.position.x += 0.025;
+    if (c.position.x > 650) c.position.x = -650;
+  }
 }
 
 function render() {
