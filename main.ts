@@ -3,7 +3,7 @@
 // /output/dossier.json with the kit's buildDossier. Node 22 standard
 // library only; no timestamps, no randomness, so two runs are byte-identical.
 import { buildDossier } from './vendor/makefun-game.ts';
-import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname);
@@ -24,7 +24,6 @@ function copyTree(src: string, dst: string): void {
   }
 }
 
-rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
 
 const gameDir = join(ROOT, 'game');
